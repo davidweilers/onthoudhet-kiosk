@@ -1,0 +1,9 @@
+[package]
+name = "onthoudhet-kiosk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14", features = ["canvas","tokio","debug", "image", "advanced"] }
+image = { version = "0.25.10", features = ["png"] }
+tokio = { version = "1.32", features = ["full"] }
