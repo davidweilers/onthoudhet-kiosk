@@ -1,9 +1,9 @@
 use iced::time::milliseconds;
-use iced::{keyboard, time};
 use iced::widget::{button, center_y, column, container, image, row, text, text_input};
 use iced::window;
 use iced::window::screenshot::{self, Screenshot};
 use iced::{Center, ContentFit, Element, Fill, FillPortion, Rectangle, Subscription, Task};
+use iced::{keyboard, time};
 
 use ::image as img;
 use ::image::ColorType;
@@ -41,11 +41,13 @@ enum State {
 
 #[derive(Clone, Debug)]
 enum Message {
-    Crop,
     Screenshot,
     Screenshotted(Screenshot),
     Png,
     PngSaved(Result<String, PngError>),
+    Exit,
+    Url,
+
     XInputChanged(Option<u32>),
     YInputChanged(Option<u32>),
     WidthInputChanged(Option<u32>),
@@ -71,13 +73,12 @@ impl Example {
 
                     println!("Tick: {:?}", self.duration);
 
-                    if self.duration.as_secs_f32() >= 5.0 {
+                    if self.duration.as_secs_f32() >= 2.0 {
                         self.state = State::Idle;
                         self.duration = std::time::Duration::ZERO;
                         return window::latest()
                             .and_then(window::screenshot)
-                            .map(Message::Screenshotted)
-                            .map(Message::Png);
+                            .map(Message::Screenshotted);
                     }
                 }
             }
@@ -95,6 +96,7 @@ impl Example {
                         screenshot.rgba,
                     ),
                 ));
+                return Task::done(Message::Png);
             }
             Message::Png => {
                 if let Some((screenshot, _handle)) = &self.screenshot {
@@ -119,32 +121,21 @@ impl Example {
             Message::HeightInputChanged(new_value) => {
                 self.height_input_value = new_value;
             }
-            Message::Crop => {
-                if let Some((screenshot, _handle)) = &self.screenshot {
-                    let cropped = screenshot.crop(Rectangle::<u32> {
-                        x: self.x_input_value.unwrap_or(0),
-                        y: self.y_input_value.unwrap_or(0),
-                        width: self.width_input_value.unwrap_or(0),
-                        height: self.height_input_value.unwrap_or(0),
-                    });
-
-                    match cropped {
-                        Ok(screenshot) => {
-                            self.screenshot = Some((
-                                screenshot.clone(),
-                                image::Handle::from_rgba(
-                                    screenshot.size.width,
-                                    screenshot.size.height,
-                                    screenshot.rgba,
-                                ),
-                            ));
-                            self.crop_error = None;
+            Message::Exit => {
+                std::process::exit(0);
+            }
+            Message::Url => {
+                return Task::perform(fetch_data(), |result| {
+                    match result {
+                        Ok(data) => {
+                            println!("Fetched data: {}", data);
                         }
-                        Err(crop_error) => {
-                            self.crop_error = Some(crop_error);
+                        Err(err) => {
+                            eprintln!("Error fetching data: {}", err);
                         }
                     }
-                }
+                    Message::Exit
+                });
             }
         }
 
@@ -152,95 +143,9 @@ impl Example {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let image: Element<Message> = if let Some((_screenshot, handle)) = &self.screenshot {
-            image(handle)
-                .content_fit(ContentFit::Contain)
-                .width(Fill)
-                .height(Fill)
-                .into()
-        } else {
-            text("Press the button to take a screenshot!").into()
-        };
+        let side_content = column![text!("Crop parameters:").size(20),];
 
-        let image = center_y(image)
-            .height(FillPortion(2))
-            .padding(10)
-            .style(container::rounded_box);
-
-        let crop_origin_controls = row![
-            text("X:").width(30),
-            numeric_input("0", self.x_input_value).map(Message::XInputChanged),
-            text("Y:").width(30),
-            numeric_input("0", self.y_input_value).map(Message::YInputChanged)
-        ]
-        .spacing(10)
-        .align_y(Center);
-
-        let crop_dimension_controls = row![
-            text("W:").width(30),
-            numeric_input("0", self.width_input_value).map(Message::WidthInputChanged),
-            text("H:").width(30),
-            numeric_input("0", self.height_input_value).map(Message::HeightInputChanged)
-        ]
-        .spacing(10)
-        .align_y(Center);
-
-        let crop_controls = column![
-            crop_origin_controls,
-            crop_dimension_controls,
-            self.crop_error
-                .as_ref()
-                .map(|error| text!("Crop error! \n{error}")),
-        ]
-        .spacing(10)
-        .align_x(Center);
-
-        let controls = {
-            let save_result = self
-                .saved_png_path
-                .as_ref()
-                .map(|png_result| match png_result {
-                    Ok(path) => format!("Png saved as: {path:?}!"),
-                    Err(PngError(error)) => {
-                        format!("Png could not be saved due to:\n{error}")
-                    }
-                });
-
-            column![
-                column![
-                    button(centered_text("Screenshot!"))
-                        .padding([10, 20])
-                        .width(Fill)
-                        .on_press(Message::Screenshot),
-                    if !self.png_saving {
-                        button(centered_text("Save as png"))
-                            .on_press_maybe(self.screenshot.is_some().then(|| Message::Png))
-                    } else {
-                        button(centered_text("Saving...")).style(button::secondary)
-                    }
-                    .style(button::secondary)
-                    .padding([10, 20])
-                    .width(Fill)
-                ]
-                .spacing(10),
-                column![
-                    crop_controls,
-                    button(centered_text("Crop"))
-                        .on_press(Message::Crop)
-                        .style(button::danger)
-                        .padding([10, 20])
-                        .width(Fill),
-                ]
-                .spacing(10)
-                .align_x(Center),
-                save_result.map(text)
-            ]
-            .spacing(40)
-        };
-
-        let side_content = center_y(controls);
-
-        let content = row![side_content, image]
+        let content = row![side_content]
             .spacing(10)
             .width(Fill)
             .height(Fill)
@@ -256,36 +161,27 @@ impl Example {
             State::Ticking { .. } => time::every(milliseconds(100)).map(Message::Tick),
         };
 
-        // keyboard::listen().filter_map(|event| {
-        //     if let keyboard::Event::KeyPressed {
-        //         modified_key: keyboard::Key::Named(key::Named::F5),
-        //         ..
-        //     } = event
-        //     {
-        //         Some(Message::Screenshot)
-        //     } else {
-        //         None
-        //     }
-        // })
-
-         Subscription::batch(vec![tick, keyboard::listen().filter_map(|event| {
-            if let keyboard::Event::KeyPressed {
-                modified_key: keyboard::Key::Named(key::Named::F5),
-                ..
-            } = event
-            {
-                Some(Message::Screenshot)
-            } else {
-                None
-            }
-        })])
+        Subscription::batch(vec![
+            tick,
+            keyboard::listen().filter_map(|event| {
+                if let keyboard::Event::KeyPressed {
+                    modified_key: keyboard::Key::Named(key::Named::F5),
+                    ..
+                } = event
+                {
+                    Some(Message::Screenshot)
+                } else {
+                    None
+                }
+            }),
+        ])
     }
 }
 
 async fn save_to_png(screenshot: Screenshot) -> Result<String, PngError> {
     let path = "screenshot.png".to_string();
 
-    tokio::task::spawn_blocking(move || {
+    let _ = tokio::task::spawn_blocking(move || {
         img::save_buffer(
             &path,
             &screenshot.rgba,
@@ -297,7 +193,26 @@ async fn save_to_png(screenshot: Screenshot) -> Result<String, PngError> {
         .map_err(|error| PngError(error.to_string()))
     })
     .await
-    .expect("Blocking task to finish")
+    .expect("Blocking task to finish");
+
+    pimoroni_notify().await.expect("?");
+    Ok("screenshot.png".to_string())
+}
+
+async fn pimoroni_notify() -> tokio::io::Result<()> {
+    sh_exec("/home/david/onthoudhet-kiosk.sh").await
+}
+
+async fn sh_exec(command: &str) -> tokio::io::Result<()> {
+    use tokio::process::Command;
+
+    Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .spawn()?
+        .wait()
+        .await
+        .map(|_| ())
 }
 
 #[derive(Clone, Debug)]
@@ -323,4 +238,12 @@ fn numeric_input(placeholder: &str, value: Option<u32>) -> Element<'_, Option<u3
 
 fn centered_text(content: &str) -> Element<'_, Message> {
     text(content).width(Fill).align_x(Center).into()
+}
+
+async fn fetch_data() -> Result<String, reqwest::Error> {
+    let response = reqwest::get("https://onthoudhetv2.weilers.nl/")
+        .await?
+        .text()
+        .await?;
+    Ok(response)
 }
