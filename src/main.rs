@@ -21,13 +21,13 @@ struct Example {
     screenshot: Option<(Screenshot, image::Handle)>,
     saved_png_path: Option<Result<String, PngError>>,
     png_saving: bool,
-    crop_error: Option<screenshot::CropError>,
     x_input_value: Option<u32>,
     y_input_value: Option<u32>,
     width_input_value: Option<u32>,
     height_input_value: Option<u32>,
     state: State,
     duration: std::time::Duration,
+    string: String,
 }
 
 #[derive(Default, Debug)]
@@ -47,6 +47,7 @@ enum Message {
     PngSaved(Result<String, PngError>),
     Exit,
     Url,
+    DataFetched(String),
 
     XInputChanged(Option<u32>),
     YInputChanged(Option<u32>),
@@ -66,6 +67,11 @@ impl Example {
     }
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::DataFetched(data) => {
+                self.string = data;
+                return Task::done(Message::Screenshot);
+
+            }
             Message::Tick(now) => {
                 if let State::Ticking { last_tick } = &mut self.state {
                     self.duration += now - *last_tick;
@@ -76,9 +82,10 @@ impl Example {
                     if self.duration.as_secs_f32() >= 2.0 {
                         self.state = State::Idle;
                         self.duration = std::time::Duration::ZERO;
-                        return window::latest()
-                            .and_then(window::screenshot)
-                            .map(Message::Screenshotted);
+                        return Task::done(Message::Url);
+                        // return window::latest()
+                        //     .and_then(window::screenshot)
+                        //     .map(Message::Screenshotted);
                     }
                 }
             }
@@ -127,14 +134,9 @@ impl Example {
             Message::Url => {
                 return Task::perform(fetch_data(), |result| {
                     match result {
-                        Ok(data) => {
-                            println!("Fetched data: {}", data);
-                        }
-                        Err(err) => {
-                            eprintln!("Error fetching data: {}", err);
-                        }
+                        Ok(data) => Message::DataFetched(data),
+                        Err(_) => Message::DataFetched("Failed to fetch data".to_string()),
                     }
-                    Message::Exit
                 });
             }
         }
@@ -143,7 +145,7 @@ impl Example {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let side_content = column![text!("Crop parameters:").size(20),];
+        let side_content = column![text!("{}", self.string).size(20),];
 
         let content = row![side_content]
             .spacing(10)

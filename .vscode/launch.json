@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug executable 'onthoudhet'",
+            "name": "Debug executable 'onthoudhet-kiosk'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
@@ -17,7 +17,7 @@
             "args": []
         },
         {
-            "name": "Debug unit tests in executable 'onthoudhet'",
+            "name": "Debug unit tests in executable 'onthoudhet-kiosk'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
