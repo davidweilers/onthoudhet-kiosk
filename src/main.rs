@@ -1,95 +1,62 @@
-use iced::time::milliseconds;
-use iced::widget::{button, center_y, column, container, image, row, text, text_input};
-use iced::window;
-use iced::window::screenshot::{self, Screenshot};
-use iced::{Center, ContentFit, Element, Fill, FillPortion, Rectangle, Subscription, Task};
-use iced::{keyboard, time};
-
 use ::image as img;
 use ::image::ColorType;
+use iced::widget::{button, center_y, column, container, image, row, text, text_input};
+use iced::window::screenshot::{self, Screenshot};
+use iced::{Element, Subscription, Task, time, window};
+use iced_webview::{Action, PageType, WebView};
+use std::time::Duration;
 
-fn main() -> iced::Result {
-    // tracing_subscriber::fmt::init();
+type Engine = iced_webview::Litehtml; // or Blitz, Servo, Cef
 
-    iced::application(Example::default, Example::update, Example::view)
-        .subscription(Example::subscription)
-        .run()
-}
-
-#[derive(Default)]
-struct Example {
-    screenshot: Option<(Screenshot, image::Handle)>,
-    saved_png_path: Option<Result<String, PngError>>,
-    png_saving: bool,
-    x_input_value: Option<u32>,
-    y_input_value: Option<u32>,
-    width_input_value: Option<u32>,
-    height_input_value: Option<u32>,
-    state: State,
-    duration: std::time::Duration,
-    string: String,
-}
-
-#[derive(Default, Debug)]
-enum State {
-    #[default]
-    Idle,
-    Ticking {
-        last_tick: std::time::Instant,
-    },
-}
-
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 enum Message {
+    WebView(Action),
+    ViewCreated,
     Screenshot,
     Screenshotted(Screenshot),
     Png,
     PngSaved(Result<String, PngError>),
-    Exit,
-    Url,
-    DataFetched(String),
-
-    XInputChanged(Option<u32>),
-    YInputChanged(Option<u32>),
-    WidthInputChanged(Option<u32>),
-    HeightInputChanged(Option<u32>),
-    Tick(std::time::Instant),
 }
 
-impl Example {
-    fn default() -> Self {
-        Self {
-            state: State::Ticking {
-                last_tick: std::time::Instant::now(),
+struct App {
+    webview: WebView<Engine, Message>,
+    ready: bool,
+    screenshot: Option<(Screenshot, image::Handle)>,
+    saved_png_path: Option<Result<String, PngError>>,
+    png_saving: bool,
+}
+
+impl App {
+    fn new() -> (Self, Task<Message>) {
+        let webview = WebView::new()
+            .on_create_view(Message::ViewCreated)
+            .on_action(Message::WebView);
+        (
+            Self {
+                webview,
+                ready: false,
+                screenshot: None,
+                saved_png_path: None,
+                png_saving: false,
             },
-            ..Default::default()
-        }
+            Task::done(Message::WebView(Action::CreateView(PageType::Url(
+                "https://onthoudhetv2.weilers.nl/".to_string(),
+            )))),
+        )
     }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::DataFetched(data) => {
-                self.string = data;
-                return Task::done(Message::Screenshot);
-
-            }
-            Message::Tick(now) => {
-                if let State::Ticking { last_tick } = &mut self.state {
-                    self.duration += now - *last_tick;
-                    *last_tick = now;
-
-                    println!("Tick: {:?}", self.duration);
-
-                    if self.duration.as_secs_f32() >= 2.0 {
-                        self.state = State::Idle;
-                        self.duration = std::time::Duration::ZERO;
-                        return Task::done(Message::Url);
-                        // return window::latest()
-                        //     .and_then(window::screenshot)
-                        //     .map(Message::Screenshotted);
-                    }
-                }
+            Message::WebView(action) => self.webview.update(action),
+            Message::ViewCreated => {
+                println!("WebView is ready!");
+                self.ready = true;
+                self.webview.update(Action::ChangeView(0))
             }
             Message::Screenshot => {
+                if self.png_saving {
+                    return Task::none();
+                }
                 return window::latest()
                     .and_then(window::screenshot)
                     .map(Message::Screenshotted);
@@ -111,73 +78,45 @@ impl Example {
 
                     return Task::perform(save_to_png(screenshot.clone()), Message::PngSaved);
                 }
+                return Task::none();
             }
             Message::PngSaved(res) => {
                 self.png_saving = false;
                 self.saved_png_path = Some(res);
-            }
-            Message::XInputChanged(new_value) => {
-                self.x_input_value = new_value;
-            }
-            Message::YInputChanged(new_value) => {
-                self.y_input_value = new_value;
-            }
-            Message::WidthInputChanged(new_value) => {
-                self.width_input_value = new_value;
-            }
-            Message::HeightInputChanged(new_value) => {
-                self.height_input_value = new_value;
-            }
-            Message::Exit => {
-                std::process::exit(0);
-            }
-            Message::Url => {
-                return Task::perform(fetch_data(), |result| {
-                    match result {
-                        Ok(data) => Message::DataFetched(data),
-                        Err(_) => Message::DataFetched("Failed to fetch data".to_string()),
-                    }
-                });
+                return Task::none();
             }
         }
-
-        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let side_content = column![text!("{}", self.string).size(20),];
-
-        let content = row![side_content]
-            .spacing(10)
-            .width(Fill)
-            .height(Fill)
-            .align_y(Center);
-
-        container(content).padding(10).into()
+        if self.ready {
+            self.webview.view().map(Message::WebView)
+        } else {
+            iced::widget::text("Loading...").into()
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        use keyboard::key;
-        let tick = match self.state {
-            State::Idle => Subscription::none(),
-            State::Ticking { .. } => time::every(milliseconds(100)).map(Message::Tick),
-        };
-
         Subscription::batch(vec![
-            tick,
-            keyboard::listen().filter_map(|event| {
-                if let keyboard::Event::KeyPressed {
-                    modified_key: keyboard::Key::Named(key::Named::F5),
-                    ..
-                } = event
-                {
-                    Some(Message::Screenshot)
-                } else {
-                    None
-                }
-            }),
+            time::every(Duration::from_millis(10))
+                .map(|_| Action::Update)
+                .map(Message::WebView),
+            time::every(Duration::from_secs(1)).map(|_| Message::Screenshot),
         ])
     }
+}
+
+fn main() -> iced::Result {
+    // CEF requires this at the top of main()
+    #[cfg(feature = "cef")]
+    if iced_webview::cef_subprocess_check() {
+        return Ok(());
+    }
+
+    iced::application(App::new, App::update, App::view)
+        .title("Webview")
+        .subscription(App::subscription)
+        .run()
 }
 
 async fn save_to_png(screenshot: Screenshot) -> Result<String, PngError> {
@@ -197,55 +136,9 @@ async fn save_to_png(screenshot: Screenshot) -> Result<String, PngError> {
     .await
     .expect("Blocking task to finish");
 
-    pimoroni_notify().await.expect("?");
+    // pimoroni_notify().await.expect("?");
     Ok("screenshot.png".to_string())
-}
-
-async fn pimoroni_notify() -> tokio::io::Result<()> {
-    sh_exec("/home/david/onthoudhet-kiosk.sh").await
-}
-
-async fn sh_exec(command: &str) -> tokio::io::Result<()> {
-    use tokio::process::Command;
-
-    Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .spawn()?
-        .wait()
-        .await
-        .map(|_| ())
 }
 
 #[derive(Clone, Debug)]
 struct PngError(String);
-
-fn numeric_input(placeholder: &str, value: Option<u32>) -> Element<'_, Option<u32>> {
-    text_input(
-        placeholder,
-        &value.as_ref().map(ToString::to_string).unwrap_or_default(),
-    )
-    .on_input(move |text| {
-        if text.is_empty() {
-            None
-        } else if let Ok(new_value) = text.parse() {
-            Some(new_value)
-        } else {
-            value
-        }
-    })
-    .width(40)
-    .into()
-}
-
-fn centered_text(content: &str) -> Element<'_, Message> {
-    text(content).width(Fill).align_x(Center).into()
-}
-
-async fn fetch_data() -> Result<String, reqwest::Error> {
-    let response = reqwest::get("https://onthoudhetv2.weilers.nl/")
-        .await?
-        .text()
-        .await?;
-    Ok(response)
-}
