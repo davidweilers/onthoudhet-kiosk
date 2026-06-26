@@ -69,15 +69,19 @@ impl App {
                     let now = std::time::Instant::now();
                     self.tick_duration = now.duration_since(last_tick);
                     self.state = State::Ticking { last_tick: now };
-                    if self.tick_count % 80 == 0 {
+                    if self.tick_count % 100 == 0 {
                         println!("Tick duration: {:?}", self.tick_duration);
-                        self.ready = false;
-                        self.webview.update(Action::ChangeView(0));
+                        // self.ready = false;
+                        // let _ = self.webview.update(Action::ChangeView(0));
                     }
                 }
                 return Task::none();
             }
-            Message::WebView(action) => self.webview.update(action),
+            
+            Message::WebView(action) => {
+                println!("WebView action: {:?}", action);
+                self.webview.update(action)
+            }
             Message::ViewCreated => {
                 println!("WebView is ready!");
                 self.ready = true;
